@@ -1,0 +1,39 @@
+def optimal_bst(p, q):
+    n = len(p)
+    p1 = [0.0] + p
+    e = [[0.0]*(n+2) for _ in range(n+2)]
+    w = [[0.0]*(n+2) for _ in range(n+2)]
+    root = [[0]*(n+2) for _ in range(n+2)]
+
+    for i in range(1, n+2):
+        e[i][i-1] = q[i-1]
+        w[i][i-1] = q[i-1]
+
+    for l in range(1, n+1):
+        for i in range(1, n-l+2):
+            j = i + l - 1
+            e[i][j] = float('inf')
+            w[i][j] = w[i][j-1] + p1[j] + q[j]
+            for r in range(i, j+1):
+                cost_r = e[i][r-1] + e[r+1][j] + w[i][j]
+                if cost_r < e[i][j]:
+                    e[i][j] = cost_r
+                    root[i][j] = r
+
+    def preorder(i, j):
+        if i > j:
+            return []
+        r = root[i][j]
+        return [r-1] + preorder(i, r-1) + preorder(r+1, j)
+
+    cost = round(e[1][n], 4)
+    preorder_traversal = preorder(1, n)
+    return cost, preorder_traversal
+
+n = int(input())
+keys = list(map(int, input().split()))
+p = list(map(float, input().split()))
+q = list(map(float, input().split()))
+cost, preorder_trav = optimal_bst(p, q)
+print(f"cost = {cost:.4f}")
+print(f"preorder = {preorder_trav}")
