@@ -1,0 +1,68 @@
+
+ADJ_MATRIX = [
+    [0, 1, 1, 0, 1], 
+    [1, 0, 1, 1, 0], 
+    [1, 1, 0, 1, 1], 
+    [0, 1, 1, 0, 1], 
+    [1, 0, 1, 1, 0]  
+]
+N = len(ADJ_MATRIX) 
+VERTICES = ['T', 'M', 'S', 'H', 'C']
+
+
+path_vector = [0] * N
+path_vector[0] = 0
+
+found_cycle = False
+
+def print_solution(path):
+    global found_cycle
+    found_cycle = True
+    
+    route = [VERTICES[i] for i in path]
+    cycle = " -> ".join(route) + f" -> {VERTICES[path[0]]}"
+    
+    print("\nSUCCESS: Hamiltonian Cycle Found!")
+    print(f"Patrol Route: {cycle}")
+    print("---------------------------------------")
+    
+
+def is_safe(k, current_vertex_index):
+    
+    previous_vertex_index = path_vector[k-1]
+    if ADJ_MATRIX[previous_vertex_index][current_vertex_index] == 0:
+        return False
+    
+    for i in range(k):
+        if path_vector[i] == current_vertex_index:
+            return False
+            
+    if k == N - 1:
+        if ADJ_MATRIX[current_vertex_index][path_vector[0]] == 0:
+            return False
+
+    return True
+
+def find_hamiltonian_cycle(k):
+    global path_vector
+
+    if found_cycle:
+        return
+
+    if k == N:
+        print_solution(path_vector)
+        return
+
+    for vertex_index in range(N):
+        
+        if is_safe(k, vertex_index):
+            
+            path_vector[k] = vertex_index
+            
+            find_hamiltonian_cycle(k + 1)
+            
+
+find_hamiltonian_cycle(1)
+
+if not found_cycle:
+    print("\nFAILURE: No Hamiltonian Cycle exists for the given road network.")
