@@ -1,0 +1,231 @@
+import streamlit as st
+import pandas as pd
+import csv
+import os
+import io # Use io for reading CSV in a memory-safe way if needed
+import altair as alt # Import Altair for better chart customization
+
+# --- Configuration and Weights ---
+WEIGHTS = {
+    "profit_margin_ratio": 0.4,
+    "market_demand_level": 0.35,
+    "dealer_rating_score": 0.25
+}
+
+DEMAND_MULTIPLIERS = {
+    1: 0.5, # Low Demand
+    2: 1.0, # Medium Demand
+    3: 1.8  # High Demand
+}
+
+BUY_THRESHOLD = 60
+CSV_FILENAME = "preset_products.csv"
+
+# --- Analysis Logic (Adapted from previous code) ---
+
+class ItemAnalyzer:
+    """
+    Analyzes an item's viability based on cost, selling price, dealer review,
+    and estimated market demand.
+    """
+    def __init__(self, name, cost, expected_sale_price, dealer_rating_10, market_demand_level):
+        self.name = name
+        self.cost = cost
+        self.expected_sale_price = expected_sale_price
+        self.dealer_rating = max(0, min(10, dealer_rating_10))
+        self.market_demand = max(1, min(3, market_demand_level))
+        self.analysis = {}
+
+    def calculate_metrics(self):
+        profit = self.expected_sale_price - self.cost
+        if self.cost > 0:
+            profit_margin_ratio = profit / self.cost
+        else:
+            profit_margin_ratio = 0
+
+        self.analysis['profit'] = round(profit, 2)
+        self.analysis['profit_margin_ratio'] = profit_margin_ratio
+
+    def calculate_viability_score(self):
+        scaled_profit_score = min(2.0, self.analysis['profit_margin_ratio']) / 2.0
+        demand_multiplier = DEMAND_MULTIPLIERS.get(self.market_demand, 1.0)
+        scaled_dealer_rating = self.dealer_rating / 10.0
+
+        weighted_score = (
+            (scaled_profit_score * WEIGHTS["profit_margin_ratio"]) +
+            (demand_multiplier * WEIGHTS["market_demand_level"]) +
+            (scaled_dealer_rating * WEIGHTS["dealer_rating_score"])
+        )
+
+        MAX_THEORETICAL_WEIGHTED_SCORE = 1.5
+        # Cap score at 100 for visualization purposes
+        final_score = min(100.0, (weighted_score / MAX_THEORETICAL_WEIGHTED_SCORE) * 100)
+
+        self.analysis['final_viability_score'] = round(final_score, 2)
+
+    def determine_recommendation(self):
+        score = self.analysis['final_viability_score']
+
+        if score >= BUY_THRESHOLD:
+            recommendation = "RECOMMENDED (Strong Buy)"
+            icon = "✅"
+        elif score >= BUY_THRESHOLD - 10:
+            recommendation = "CAUTION (Moderate Buy)"
+            icon = "⚠️"
+        else:
+            recommendation = "NOT RECOMMENDED (Weak Buy/Avoid)"
+            icon = "❌"
+
+        self.analysis['recommendation'] = f"{icon} {recommendation}"
+    
+    def analyze(self):
+        self.calculate_metrics()
+        self.calculate_viability_score()
+        self.determine_recommendation()
+        return self.analysis
+
+# Use Streamlit's cache decorator to load data only once
+@st.cache_data
+def load_products_from_csv(filename):
+    """Loads product data from the CSV file into a dictionary for lookup."""
+    product_data = {}
+    try:
+        # Using pandas is more robust for data loading in Streamlit
+        df = pd.read_csv(filename)
+        for _, row in df.iterrows():
+            product_name_key = row['name'].strip().upper()
+            product_data[product_name_key] = {
+                'cost': row['cost'],
+                'expected_sale_price': row['expected_sale_price'],
+                'dealer_rating_10': row['dealer_rating_10'],
+                'market_demand_level': row['market_demand_level'],
+                'display_name': row['name'].strip()
+            }
+        return product_data
+    except FileNotFoundError:
+        st.error(f"ERROR: The file '{filename}' was not found. Please ensure it is in the same directory as the Streamlit script.")
+        return None
+    except Exception as e:
+        st.error(f"ERROR: Failed to read or parse the CSV file: {e}")
+        return None
+
+# --- Streamlit UI and Execution ---
+
+def run_analysis_app():
+    """Main Streamlit application function."""
+    
+    st.set_page_config(
+        page_title="Investment Viability Analyzer",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    st.title("🛍️ Shopkeeper Investment Viability Analyzer")
+    st.markdown("---")
+
+    # Load Data
+    product_db = load_products_from_csv(CSV_FILENAME)
+
+    if product_db is None or not product_db:
+        st.warning("Cannot run analysis because the product database is empty or failed to load.")
+        return
+
+    # --- Sidebar for product selection ---
+    st.sidebar.header("Select Product")
+    product_names = [data['display_name'] for data in product_db.values()]
+    selected_name = st.sidebar.selectbox("Choose an item to analyze:", product_names)
+    
+    # --- Main Content Display ---
+    
+    if selected_name:
+        st.header(f"Report for: {selected_name}")
+        
+        item_key = selected_name.upper()
+        item_data = product_db[item_key]
+
+        # Run Analysis
+        analyzer = ItemAnalyzer(
+            name=item_data['display_name'],
+            cost=item_data['cost'],
+            expected_sale_price=item_data['expected_sale_price'],
+            dealer_rating_10=item_data['dealer_rating_10'],
+            market_demand_level=item_data['market_demand_level']
+        )
+        analysis = analyzer.analyze()
+        
+        score = analysis['final_viability_score']
+        recommendation = analysis['recommendation']
+        
+        col1, col2, col3 = st.columns(3)
+        
+        # Display key metrics using st.metric
+        with col1:
+            st.metric("Final Recommendation", recommendation)
+        with col2:
+            st.metric("Viability Score (0-100)", f"{score:.2f}%",
+                    delta=f"Threshold: {BUY_THRESHOLD}%")
+        with col3:
+            st.metric("Estimated Profit", f"${analysis['profit']:.2f}",
+                      delta=f"Margin: {analysis['profit_margin_ratio'] * 100:.1f}%")
+
+        st.markdown("---")
+        
+        # --- Visualization (Bar Chart) ---
+        st.subheader("Score vs. Buy Threshold Visualization")
+        
+        # New DataFrame structure for Altair
+        chart_data = pd.DataFrame({
+            'Metric': ['Viability Score', 'Buy Threshold'],
+            'Value': [score, BUY_THRESHOLD],
+            # Add a dedicated color column for Altair
+            'Color_Code': [
+                "#10b981" if score >= BUY_THRESHOLD else ("#f59e0b" if score >= BUY_THRESHOLD - 10 else "#ef4444"), 
+                "#4b5563"
+            ]
+        })
+        
+        # Create Altair Chart for fine-grained color control
+        chart = alt.Chart(chart_data).mark_bar().encode(
+            x=alt.X('Metric', sort=['Viability Score', 'Buy Threshold']),
+            y=alt.Y('Value', title='Score Percentage (0-100)', scale=alt.Scale(domain=[0, 100])),
+            color=alt.Color('Color_Code', scale=None), # Use the explicit color column
+            tooltip=['Metric', 'Value']
+        ).properties(
+            title="Investment Score vs. Target"
+        ).interactive() # Make the chart zoomable/pannable
+        
+        st.altair_chart(chart, use_container_width=True)
+        
+        st.markdown("---")
+
+        # --- Detailed Metrics Table ---
+        st.subheader("Detailed Input Factors")
+        
+        demand_map = {1: "Low", 2: "Medium", 3: "High"}
+        
+        detail_data = {
+            "Factor": [
+                "Cost ($)",
+                "Expected Sale Price ($)",
+                "Dealer Rating (0-10)",
+                "Market Demand (1-3)"
+            ],
+            "Value": [
+                f"${item_data['cost']:.2f}",
+                f"${item_data['expected_sale_price']:.2f}",
+                f"{item_data['dealer_rating_10']}",
+                f"{demand_map.get(item_data['market_demand_level'], 'N/A')} ({item_data['market_demand_level']})"
+            ],
+            "Weight (Contribution to Score)": [
+                f"N/A", # Cost/Price are components of Profit
+                f"N/A",
+                f"{WEIGHTS['dealer_rating_score'] * 100:.0f}%",
+                f"{WEIGHTS['market_demand_level'] * 100:.0f}%"
+            ]
+        }
+        
+        st.dataframe(pd.DataFrame(detail_data), use_container_width=True, hide_index=True)
+
+
+if __name__ == '__main__':
+    run_analysis_app()
